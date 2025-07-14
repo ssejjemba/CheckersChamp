@@ -1,7 +1,8 @@
+
 "use client";
 
 import React, { createContext, useState, useEffect, useCallback } from 'react';
-import type { BoardState, Player, Piece, LegalMove } from '@/lib/types';
+import type { BoardState, Player, Piece, LegalMove, Difficulty } from '@/lib/types';
 import { createInitialBoard, BOARD_SIZE, isSquareOnBoard } from '@/lib/game-logic';
 import { getMoveHint } from '@/ai/ai-move-hint';
 import { convertBoardToString, convertAlphanumericToPos } from '@/lib/utils';
@@ -17,6 +18,8 @@ export interface GameContextType {
   winner: Player | null;
   capturedPieces: { red: number; black: number };
   isAITurn: boolean;
+  difficulty: Difficulty;
+  setDifficulty: (difficulty: Difficulty) => void;
 }
 
 export const GameContext = createContext<GameContextType | null>(null);
@@ -29,6 +32,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   const [winner, setWinner] = useState<Player | null>(null);
   const [capturedPieces, setCapturedPieces] = useState({ red: 0, black: 0 });
   const [isAITurn, setIsAITurn] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty>('medium');
 
   const resetGame = useCallback(() => {
     setBoard(createInitialBoard());
@@ -38,6 +42,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     setWinner(null);
     setCapturedPieces({ red: 0, black: 0 });
     setIsAITurn(false);
+    setDifficulty('medium');
   }, []);
 
   const calculateLegalMoves = useCallback((piece: Piece, row: number, col: number, currentBoard: BoardState): LegalMove[] => {
@@ -142,7 +147,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
       const hint = await getMoveHint({
         boardState: boardString,
         playerColor: 'black',
-        difficulty: 'medium',
+        difficulty: difficulty,
       });
       
       const fromPos = convertAlphanumericToPos(hint.from);
@@ -192,7 +197,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
       setIsAITurn(false);
       // Handle error, maybe make a random move as fallback
     }
-  }, [board, winner, makeMove, calculateLegalMoves]);
+  }, [board, winner, makeMove, calculateLegalMoves, difficulty]);
 
 
   useEffect(() => {
@@ -221,7 +226,9 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     resetGame,
     winner,
     capturedPieces,
-    isAITurn
+    isAITurn,
+    difficulty,
+    setDifficulty,
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

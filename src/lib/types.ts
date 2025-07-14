@@ -1,5 +1,7 @@
+
 export type Player = 'red' | 'black';
 export type PieceType = 'man' | 'king';
+export type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
 
 export interface Piece {
   player: Player;
