@@ -6,7 +6,7 @@ import { PlayerInfo } from './player-info';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { useGame } from '@/hooks/use-game';
-import { Bot, RefreshCw, Sparkles, Users } from 'lucide-react';
+import { Bot, RefreshCw, Sparkles, Users, Globe } from 'lucide-react';
 import { Separator } from './ui/separator';
 import { Header } from './header';
 
