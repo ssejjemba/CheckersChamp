@@ -38,12 +38,12 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   
   const { toast } = useToast();
   const aiWorkerRef = useRef<Worker>();
+  const isWorkerReady = useRef(false);
 
   const makeMove = useCallback((move: LegalMove) => {
     setBoard(currentBoard => {
       const pieceToMove = currentBoard[move.from.row][move.from.col];
 
-      // Ensure the move is for the current player
       if (!pieceToMove) {
         return currentBoard; 
       }
@@ -78,12 +78,12 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     aiWorkerRef.current = new Worker(new URL('../../workers/ai-worker.ts', import.meta.url));
+    isWorkerReady.current = true;
     
     const messageHandler = (event: MessageEvent<{ bestMove: LegalMove | null, type: 'move' | 'hint' }>) => {
       const { bestMove, type } = event.data;
       if (bestMove) {
         if (type === 'move') {
-          // Add a thinking delay to make the AI's move feel more natural
           setTimeout(() => {
             makeMove(bestMove);
             setIsAITurn(false);
@@ -104,8 +104,6 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
       } else {
         if (type === 'move') {
            setIsAITurn(false);
-           // This case can happen if the AI has no moves, leading to a win for the other player.
-           // The win condition logic should handle this.
         }
         if (type === 'hint') {
             setIsHintLoading(false);
@@ -123,6 +121,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     return () => {
       aiWorkerRef.current?.removeEventListener('message', messageHandler);
       aiWorkerRef.current?.terminate();
+      isWorkerReady.current = false;
     };
   }, [board, currentPlayer, makeMove, toast]);
 
@@ -141,7 +140,6 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     if (winner || isAITurn || isHintLoading) return;
 
     if (piece && piece.player === currentPlayer) {
-      // If the same piece is clicked, deselect it
       if (selectedPiece && selectedPiece.row === row && selectedPiece.col === col) {
         setSelectedPiece(null);
         setLegalMoves([]);
@@ -157,7 +155,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   }, [board, currentPlayer, winner, isAITurn, selectedPiece, isHintLoading]);
 
   const triggerAIMove = useCallback(() => {
-    if (winner) return;
+    if (winner || !isWorkerReady.current) return;
     setIsAITurn(true);
     aiWorkerRef.current?.postMessage({
       type: 'move',
@@ -168,18 +166,17 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   }, [board, winner, difficulty]);
 
   const getHint = useCallback(async () => {
-    if (winner || isAITurn || isHintLoading) return;
+    if (winner || isAITurn || isHintLoading || !isWorkerReady.current) return;
     setIsHintLoading(true);
     aiWorkerRef.current?.postMessage({
         type: 'hint',
         board,
         player: currentPlayer,
-        difficulty: 'hard', // Hints should be high quality
+        difficulty: 'hard',
     });
   }, [board, winner, isAITurn, currentPlayer, isHintLoading]);
 
   useEffect(() => {
-    // Check for win/loss based on no pieces left
     const redPieces = board.flat().filter(p => p?.player === 'red').length;
     const blackPieces = board.flat().filter(p => p?.player === 'black').length;
 
@@ -192,7 +189,6 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    // Check for win/loss based on no legal moves
     const hasLegalMoves = (player: Player) => {
         for(let r = 0; r < 8; r++) {
             for (let c = 0; c < 8; c++) {
@@ -211,7 +207,6 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
         return;
     }
 
-    // Trigger AI move if it's black's turn
     if (currentPlayer === 'black' && !winner) {
       triggerAIMove();
     }
