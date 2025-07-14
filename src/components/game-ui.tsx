@@ -11,7 +11,7 @@ import { Separator } from './ui/separator';
 import { Header } from './header';
 
 export function GameUI() {
-    const { currentPlayer, resetGame, winner, capturedPieces, isAITurn } = useGame();
+    const { currentPlayer, resetGame, winner, capturedPieces, isAITurn, getHint, isHintLoading } = useGame();
   
     return (
         <div className="flex flex-col h-screen">
@@ -27,8 +27,8 @@ export function GameUI() {
                     <h3 className="text-sm font-medium text-muted-foreground px-1">Game Mode</h3>
                     <div className="grid grid-cols-3 gap-2">
                         <Button variant="secondary" className="flex-col h-16 gap-1"><Bot size={20} /> AI Player</Button>
-                        <Button variant="outline" className="flex-col h-16 gap-1"><Users size={20} /> 1-on-1</Button>
-                        <Button variant="outline" className="flex-col h-16 gap-1"><Globe size={20} /> Online</Button>
+                        <Button variant="outline" className="flex-col h-16 gap-1" disabled><Users size={20} /> 1-on-1</Button>
+                        <Button variant="outline" className="flex-col h-16 gap-1" disabled><Globe size={20} /> Online</Button>
                     </div>
                 </div>
 
@@ -68,7 +68,14 @@ export function GameUI() {
 
 
                 <div className="mt-auto space-y-2">
-                    <Button variant="secondary" className="w-full justify-start"><Sparkles /> Get a Hint</Button>
+                    <Button 
+                      onClick={getHint} 
+                      disabled={isAITurn || isHintLoading || currentPlayer === 'black' || !!winner}
+                      variant="secondary" 
+                      className="w-full justify-start"
+                    >
+                      <Sparkles /> {isHintLoading ? 'Getting Hint...' : 'Get a Hint'}
+                    </Button>
                     <Button onClick={resetGame} variant="destructive" className="w-full justify-start"><RefreshCw /> New Game</Button>
                 </div>
               </CardContent>
