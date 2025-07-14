@@ -9,9 +9,10 @@ interface PlayerInfoProps {
   avatarUrl?: string;
   capturedCount: number;
   isCurrentPlayer: boolean;
+  isThinking?: boolean;
 }
 
-export function PlayerInfo({ player, name, avatarUrl, capturedCount, isCurrentPlayer }: PlayerInfoProps) {
+export function PlayerInfo({ player, name, avatarUrl, capturedCount, isCurrentPlayer, isThinking }: PlayerInfoProps) {
   const avatarInitial = name.charAt(0).toUpperCase();
   return (
     <div className={cn(
@@ -24,7 +25,7 @@ export function PlayerInfo({ player, name, avatarUrl, capturedCount, isCurrentPl
       </Avatar>
       <div className="flex-1">
         <p className="font-semibold font-headline">{name}</p>
-        <p className="text-sm text-muted-foreground">AI - Medium</p>
+        <p className="text-sm text-muted-foreground">{isThinking ? 'Thinking...' : 'AI - Medium'}</p>
       </div>
       <div className="flex items-center gap-2">
         <div className="w-6 h-6">

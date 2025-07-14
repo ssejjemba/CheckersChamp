@@ -3,6 +3,8 @@
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import type { BoardState, Player, Piece, LegalMove } from '@/lib/types';
 import { createInitialBoard, BOARD_SIZE, isSquareOnBoard } from '@/lib/game-logic';
+import { getMoveHint } from '@/ai/ai-move-hint';
+import { convertBoardToString, convertAlphanumericToPos } from '@/lib/utils';
 
 export interface GameContextType {
   board: BoardState;
@@ -14,6 +16,7 @@ export interface GameContextType {
   resetGame: () => void;
   winner: Player | null;
   capturedPieces: { red: number; black: number };
+  isAITurn: boolean;
 }
 
 export const GameContext = createContext<GameContextType | null>(null);
@@ -25,6 +28,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   const [legalMoves, setLegalMoves] = useState<LegalMove[]>([]);
   const [winner, setWinner] = useState<Player | null>(null);
   const [capturedPieces, setCapturedPieces] = useState({ red: 0, black: 0 });
+  const [isAITurn, setIsAITurn] = useState(false);
 
   const resetGame = useCallback(() => {
     setBoard(createInitialBoard());
@@ -33,6 +37,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     setLegalMoves([]);
     setWinner(null);
     setCapturedPieces({ red: 0, black: 0 });
+    setIsAITurn(false);
   }, []);
 
   const calculateLegalMoves = useCallback((piece: Piece, row: number, col: number, currentBoard: BoardState): LegalMove[] => {
@@ -84,7 +89,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   
   const selectPiece = useCallback((row: number, col: number) => {
     const piece = board[row][col];
-    if (winner) return;
+    if (winner || isAITurn) return;
 
     if (piece && piece.player === currentPlayer) {
       setSelectedPiece({ row, col });
@@ -94,11 +99,9 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
       setSelectedPiece(null);
       setLegalMoves([]);
     }
-  }, [board, currentPlayer, winner, calculateLegalMoves]);
+  }, [board, currentPlayer, winner, calculateLegalMoves, isAITurn]);
 
   const makeMove = useCallback((move: LegalMove) => {
-    if (!selectedPiece) return;
-
     let newBoard = board.map(r => r.slice());
     const piece = newBoard[move.from.row][move.from.col];
     if (!piece) return;
@@ -128,7 +131,75 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     setLegalMoves([]);
     setCurrentPlayer(currentPlayer === 'red' ? 'black' : 'red');
 
-  }, [board, selectedPiece, currentPlayer]);
+  }, [board, currentPlayer]);
+
+  const triggerAIMove = useCallback(async () => {
+    if (winner) return;
+    setIsAITurn(true);
+    
+    try {
+      const boardString = convertBoardToString(board);
+      const hint = await getMoveHint({
+        boardState: boardString,
+        playerColor: 'black',
+        difficulty: 'medium',
+      });
+      
+      const fromPos = convertAlphanumericToPos(hint.from);
+      const toPos = convertAlphanumericToPos(hint.to);
+
+      if (fromPos && toPos) {
+        const piece = board[fromPos.row][fromPos.col];
+        if (piece && piece.player === 'black') {
+          const possibleMoves = calculateLegalMoves(piece, fromPos.row, fromPos.col, board);
+          const aiMove = possibleMoves.find(m => m.to.row === toPos.row && m.to.col === toPos.col);
+
+          if (aiMove) {
+            // Simulate thinking time
+            setTimeout(() => {
+              makeMove(aiMove);
+              setIsAITurn(false);
+            }, 1000);
+            return;
+          }
+        }
+      }
+      
+      // Fallback: if AI provides an invalid move, pick a random legal one.
+      const allBlackMoves: LegalMove[] = [];
+      board.forEach((row, r) => {
+        row.forEach((p, c) => {
+          if (p && p.player === 'black') {
+            allBlackMoves.push(...calculateLegalMoves(p, r, c, board));
+          }
+        });
+      });
+      const captureMoves = allBlackMoves.filter(m => m.isCapture);
+      const movesToConsider = captureMoves.length > 0 ? captureMoves : allBlackMoves;
+
+      if (movesToConsider.length > 0) {
+        const randomMove = movesToConsider[Math.floor(Math.random() * movesToConsider.length)];
+        setTimeout(() => {
+          makeMove(randomMove);
+          setIsAITurn(false);
+        }, 1000);
+      } else {
+        setIsAITurn(false);
+      }
+
+    } catch (error) {
+      console.error("Error getting AI move:", error);
+      setIsAITurn(false);
+      // Handle error, maybe make a random move as fallback
+    }
+  }, [board, winner, makeMove, calculateLegalMoves]);
+
+
+  useEffect(() => {
+    if (currentPlayer === 'black' && !winner) {
+      triggerAIMove();
+    }
+  }, [currentPlayer, winner, triggerAIMove]);
 
   useEffect(() => {
     const redPieces = board.flat().filter(p => p?.player === 'red').length;
@@ -149,7 +220,8 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     makeMove,
     resetGame,
     winner,
-    capturedPieces
+    capturedPieces,
+    isAITurn
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

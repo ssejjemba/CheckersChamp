@@ -11,7 +11,7 @@ import { Separator } from './ui/separator';
 import { Header } from './header';
 
 export function GameUI() {
-    const { currentPlayer, resetGame, winner, capturedPieces } = useGame();
+    const { currentPlayer, resetGame, winner, capturedPieces, isAITurn } = useGame();
   
     return (
         <div className="flex flex-col h-screen">
@@ -50,6 +50,7 @@ export function GameUI() {
                         data-ai-hint="robot avatar"
                         capturedCount={capturedPieces.black}
                         isCurrentPlayer={currentPlayer === 'black'}
+                        isThinking={isAITurn}
                     />
                 </div>
                 
@@ -58,7 +59,7 @@ export function GameUI() {
                         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}>
                             <div className="text-center p-3 bg-card rounded-lg border">
                                 <p className="font-bold text-lg font-headline">
-                                    {currentPlayer === 'red' ? "Your Turn" : "Black's Turn"}
+                                    {isAITurn ? "AI is thinking..." : (currentPlayer === 'red' ? "Your Turn" : "Black's Turn")}
                                 </p>
                             </div>
                         </motion.div>
