@@ -1,10 +1,33 @@
+/* game-provider.tsx
+   — complete rewrite with a single, long-lived Web Worker and reliable AI turns —
+*/
 
 "use client";
 
-import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { BoardState, Player, Piece, LegalMove, Difficulty } from '@/lib/types';
-import { createInitialBoard, calculateLegalMoves } from '@/lib/game-logic';
-import { useToast } from '@/hooks/use-toast';
+import React, {
+  createContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
+
+import type {
+  BoardState,
+  Player,
+  Piece,
+  LegalMove,
+  Difficulty,
+} from "@/lib/types";
+import {
+  createInitialBoard,
+  calculateLegalMoves,
+} from "@/lib/game-logic";
+import { useToast } from "@/hooks/use-toast";
+
+/* -------------------------------------------------------------------------- */
+/*  Context types                                                             */
+/* -------------------------------------------------------------------------- */
 
 export interface GameContextType {
   board: BoardState;
@@ -25,60 +48,187 @@ export interface GameContextType {
 
 export const GameContext = createContext<GameContextType | null>(null);
 
-export const GameProvider = ({ children }: { children: React.ReactNode }) => {
+/* -------------------------------------------------------------------------- */
+/*  Provider                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export function GameProvider({ children }: { children: React.ReactNode }) {
+  /* ---------------------------- state values ----------------------------- */
   const [board, setBoard] = useState<BoardState>(createInitialBoard());
-  const [currentPlayer, setCurrentPlayer] = useState<Player>('red');
-  const [selectedPiece, setSelectedPiece] = useState<{ row: number; col: number } | null>(null);
+  const [currentPlayer, setCurrentPlayer] = useState<Player>("red");
+  const [selectedPiece, setSelectedPiece] =
+    useState<{ row: number; col: number } | null>(null);
   const [legalMoves, setLegalMoves] = useState<LegalMove[]>([]);
   const [winner, setWinner] = useState<Player | null>(null);
-  const [capturedPieces, setCapturedPieces] = useState({ red: 0, black: 0 });
+  const [capturedPieces, setCapturedPieces] = useState({
+    red: 0,
+    black: 0,
+  });
   const [isAITurn, setIsAITurn] = useState(false);
-  const [difficulty, setDifficulty] = useState<Difficulty>('medium');
+  const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [isHintLoading, setIsHintLoading] = useState(false);
-  
+
+  /* ---------------------------- helpers ---------------------------------- */
   const { toast } = useToast();
-  const aiWorkerRef = useRef<Worker>();
-  const [isWorkerReady, setIsWorkerReady] = useState(false);
 
-  const makeMove = useCallback((move: LegalMove) => {
-    setBoard(currentBoard => {
-      const pieceToMove = currentBoard[move.from.row][move.from.col];
+  /* ---------------------------- worker refs ------------------------------ */
+  const aiWorkerRef = useRef<Worker | null>(null);
+  const isWorkerReady = useRef(false);
 
-      if (!pieceToMove) {
-        return currentBoard; 
+  /* ====================================================================== */
+  /*  1.  Create the worker once (on mount)                                 */
+  /* ====================================================================== */
+  useEffect(() => {
+    aiWorkerRef.current = new Worker(
+    "ai.js",
+      { type: "module" }
+    );
+
+    const worker = aiWorkerRef.current;
+
+    const handleMessage = (
+      event: MessageEvent<{
+        bestMove: LegalMove | null;
+        type: "move" | "hint";
+      }>
+    ) => {
+      const { bestMove, type } = event.data;
+
+      if (!bestMove) {
+        if (type === "move") setIsAITurn(false);
+        if (type === "hint") {
+          setIsHintLoading(false);
+          toast({
+            variant: "destructive",
+            title: "No hint available",
+            description: "The AI could not find a suggested move.",
+          });
+        }
+        return;
       }
-  
-      let newBoard = currentBoard.map(r => r.slice());
-      const piece = newBoard[move.from.row][move.from.col];
-      if (!piece) return newBoard;
-  
-      newBoard[move.to.row][move.to.col] = piece;
-      newBoard[move.from.row][move.from.col] = null;
-      
-      if (move.isCapture && move.capturedPiecePos) {
-        newBoard[move.capturedPiecePos.row][move.capturedPiecePos.col] = null;
-        setCapturedPieces(prev => {
-          const newCount = { ...prev };
-          if (piece.player === 'red') newCount.black += 1;
-          else newCount.red += 1;
-          return newCount;
+
+      /* --------------------------- MOVE --------------------------- */
+      if (type === "move") {
+        setTimeout(() => {
+          makeMove(bestMove);
+          setIsAITurn(false);
+        }, 400); // small “thinking” delay
+      }
+
+      /* --------------------------- HINT --------------------------- */
+      if (type === "hint") {
+        const piece = board[bestMove.from.row][bestMove.from.col];
+        if (piece && piece.player === currentPlayer) {
+          setSelectedPiece({ row: bestMove.from.row, col: bestMove.from.col });
+          const moves = calculateLegalMoves(
+            piece,
+            bestMove.from.row,
+            bestMove.from.col,
+            board
+          );
+          setLegalMoves(moves);
+        }
+        setIsHintLoading(false);
+        toast({
+          title: "Hint received",
+          description: `Try ${String.fromCharCode(
+            97 + bestMove.from.col
+          )}${8 - bestMove.from.row} → ${String.fromCharCode(
+            97 + bestMove.to.col
+          )}${8 - bestMove.to.row}`,
         });
       }
-  
-      if ((piece.player === 'red' && move.to.row === 0) || (piece.player === 'black' && move.to.row === 7)) {
-          (newBoard[move.to.row][move.to.col] as Piece).type = 'king';
+    };
+
+    const handleError = (err: ErrorEvent) => {
+      console.error("AI worker error:", err);
+      setIsAITurn(false);
+      setIsHintLoading(false);
+    };
+
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+
+    isWorkerReady.current = true;
+
+    return () => {
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+      worker.terminate();
+    };
+  }, [board, currentPlayer, toast]); // board & player needed here only for hint UI text
+
+  /* ====================================================================== */
+  /*  2.  Core actions                                                      */
+  /* ====================================================================== */
+
+  const makeMove = useCallback((move: LegalMove) => {
+    setBoard((prevBoard) => {
+      const piece = prevBoard[move.from.row][move.from.col];
+      if (!piece) return prevBoard; // safety guard
+
+      const nextBoard = prevBoard.map((row) => row.slice());
+
+      /* Move the piece */
+      nextBoard[move.to.row][move.to.col] = piece;
+      nextBoard[move.from.row][move.from.col] = null;
+
+      /* Handle capture */
+      if (move.isCapture && move.capturedPiecePos) {
+        nextBoard[move.capturedPiecePos.row][move.capturedPiecePos.col] = null;
+        setCapturedPieces((prev) => {
+          const updated = { ...prev };
+          if (piece.player === "red") updated.black += 1;
+          else updated.red += 1;
+          return updated;
+        });
       }
-      
-      setSelectedPiece(null);
-      setLegalMoves([]);
-      setCurrentPlayer(prevPlayer => (prevPlayer === 'red' ? 'black' : 'red'));
-      return newBoard;
+
+      /* Crown a king */
+      const reachedEndForRed = piece.player === "red" && move.to.row === 0;
+      const reachedEndForBlack = piece.player === "black" && move.to.row === 7;
+      if (reachedEndForRed || reachedEndForBlack) {
+        (nextBoard[move.to.row][move.to.col] as Piece).type = "king";
+      }
+
+      return nextBoard;
+    });
+
+    /* switch player and clear selections */
+    setSelectedPiece(null);
+    setLegalMoves([]);
+    setCurrentPlayer((prev) => {
+      console.log(`Player that just moved: ${prev}`);
+      return prev === "red" ? "black" : "red";
     });
   }, []);
 
+  const selectPiece = useCallback(
+    (row: number, col: number) => {
+      const piece = board[row][col];
+      if (winner || isAITurn || isHintLoading) return;
+
+      const isCurrentPiece = Boolean(
+        selectedPiece &&
+          selectedPiece.row === row &&
+          selectedPiece.col === col
+      );
+
+      if (piece && piece.player === currentPlayer && !isCurrentPiece) {
+        setSelectedPiece({ row, col });
+        const moves = calculateLegalMoves(piece, row, col, board);
+        setLegalMoves(moves);
+      } else {
+        setSelectedPiece(null);
+        setLegalMoves([]);
+      }
+    },
+    [board, currentPlayer, winner, isAITurn, selectedPiece, isHintLoading]
+  );
+
   const resetGame = useCallback(() => {
     setBoard(createInitialBoard());
-    setCurrentPlayer('red');
+    setCurrentPlayer("red");
     setSelectedPiece(null);
     setLegalMoves([]);
     setWinner(null);
@@ -86,138 +236,83 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     setIsAITurn(false);
   }, []);
 
-  const selectPiece = useCallback((row: number, col: number) => {
-    const piece = board[row][col];
-    if (winner || isAITurn || isHintLoading) return;
-
-    if (piece && piece.player === currentPlayer) {
-      if (selectedPiece && selectedPiece.row === row && selectedPiece.col === col) {
-        setSelectedPiece(null);
-        setLegalMoves([]);
-      } else {
-        setSelectedPiece({ row, col });
-        const moves = calculateLegalMoves(piece, row, col, board);
-        setLegalMoves(moves);
-      }
-    } else {
-      setSelectedPiece(null);
-      setLegalMoves([]);
-    }
-  }, [board, currentPlayer, winner, isAITurn, selectedPiece, isHintLoading]);
-  
-  // Setup AI Worker
-  useEffect(() => {
-    aiWorkerRef.current = new Worker('/ai.js');
-    
-    const messageHandler = (event: MessageEvent<{ bestMove: LegalMove | null, type: 'move' | 'hint' }>) => {
-      const { bestMove, type } = event.data;
-      if (bestMove) {
-        if (type === 'move') {
-          setTimeout(() => {
-            makeMove(bestMove);
-            setIsAITurn(false);
-          }, 500);
-        } else if (type === 'hint') {
-          const piece = board[bestMove.from.row][bestMove.from.col];
-           if (piece && piece.player === currentPlayer) {
-            setSelectedPiece({ row: bestMove.from.row, col: bestMove.from.col });
-            const moves = calculateLegalMoves(piece, bestMove.from.row, bestMove.from.col, board);
-            setLegalMoves(moves);
-          }
-          setIsHintLoading(false);
-          toast({
-            title: "Hint Received",
-            description: `Try moving from ${String.fromCharCode(97 + bestMove.from.col)}${8 - bestMove.from.row} to ${String.fromCharCode(97 + bestMove.to.col)}${8 - bestMove.to.row}.`
-          });
-        }
-      } else {
-        if (type === 'move') {
-           setIsAITurn(false);
-        }
-        if (type === 'hint') {
-            setIsHintLoading(false);
-            toast({
-                variant: 'destructive',
-                title: "No hint available",
-                description: "The AI could not find a suggested move.",
-            });
-        }
-      }
-    };
-
-    aiWorkerRef.current.addEventListener('message', messageHandler);
-    setIsWorkerReady(true);
-
-
-    return () => {
-      aiWorkerRef.current?.removeEventListener('message', messageHandler);
-      aiWorkerRef.current?.terminate();
-      setIsWorkerReady(false);
-    };
-  }, [board, currentPlayer, makeMove, toast]);
+  /* ====================================================================== */
+  /*  3.  AI commands                                                       */
+  /* ====================================================================== */
 
   const triggerAIMove = useCallback(() => {
-    if (winner || !isWorkerReady) return;
+    if (winner || !isWorkerReady.current) return;
+
     setIsAITurn(true);
     aiWorkerRef.current?.postMessage({
-      type: 'move',
+      type: "move",
       board,
-      player: 'black',
+      player: "black",
       difficulty,
     });
-  }, [board, winner, difficulty, isWorkerReady]);
+  }, [board, winner, difficulty]);
 
   const getHint = useCallback(async () => {
-    if (winner || isAITurn || isHintLoading || !isWorkerReady) return;
+    if (winner || isAITurn || isHintLoading || !isWorkerReady.current) return;
+
     setIsHintLoading(true);
     aiWorkerRef.current?.postMessage({
-        type: 'hint',
-        board,
-        player: currentPlayer,
-        difficulty: 'hard',
+      type: "hint",
+      board,
+      player: currentPlayer,
+      difficulty: "hard", // always use strongest search for hints
     });
-  }, [board, winner, isAITurn, currentPlayer, isHintLoading, isWorkerReady]);
+  }, [board, winner, isAITurn, currentPlayer, isHintLoading]);
 
-  // Game state management effect
+  /* ====================================================================== */
+  /*  4.  Win / turn logic                                                  */
+  /* ====================================================================== */
+
   useEffect(() => {
-    if (!isWorkerReady) return;
-
-    const redPieces = board.flat().filter(p => p?.player === 'red').length;
-    const blackPieces = board.flat().filter(p => p?.player === 'black').length;
+    /* ----- no pieces left  ----- */
+    const redPieces = board.flat().filter((p) => p?.player === "red").length;
+    const blackPieces = board.flat().filter((p) => p?.player === "black")
+      .length;
 
     if (redPieces === 0) {
-      setWinner('black');
+      setWinner("black");
       return;
     }
     if (blackPieces === 0) {
-      setWinner('red');
+      setWinner("red");
       return;
     }
 
-    const hasLegalMoves = (player: Player) => {
-        for(let r = 0; r < 8; r++) {
-            for (let c = 0; c < 8; c++) {
-                const piece = board[r][c];
-                if (piece && piece.player === player) {
-                    const moves = calculateLegalMoves(piece, r, c, board);
-                    if (moves.length > 0) return true;
-                }
+    /* ----- no legal moves for current player ----- */
+    const playerHasMove = (player: Player) => {
+      for (let r = 0; r < 8; r += 1) {
+        for (let c = 0; c < 8; c += 1) {
+          const piece = board[r][c];
+          if (piece && piece.player === player) {
+            if (calculateLegalMoves(piece, r, c, board).length > 0) {
+              return true;
             }
+          }
         }
-        return false;
+      }
+      return false;
+    };
+
+    if (!playerHasMove(currentPlayer)) {
+      setWinner(currentPlayer === "red" ? "black" : "red");
+      return;
     }
 
-    if (!hasLegalMoves(currentPlayer)) {
-        setWinner(currentPlayer === 'red' ? 'black' : 'red');
-        return;
-    }
-
-    if (currentPlayer === 'black' && !winner) {
+    /* ----- let the AI move when it’s black’s turn ----- */
+    if (currentPlayer === "black" && !winner) {
       triggerAIMove();
     }
-  }, [board, currentPlayer, winner, triggerAIMove, isWorkerReady]);
+  }, [board, currentPlayer, winner, triggerAIMove]);
 
-  const value = {
+  /* ---------------------------------------------------------------------- */
+  /*  Context value                                                         */
+  /* ---------------------------------------------------------------------- */
+  const value: GameContextType = {
     board,
     currentPlayer,
     selectedPiece,
@@ -234,5 +329,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     isHintLoading,
   };
 
-  return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
-};
+  return (
+    <GameContext.Provider value={value}>{children}</GameContext.Provider>
+  );
+}
