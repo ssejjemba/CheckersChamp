@@ -107,8 +107,7 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
   
   // Setup AI Worker
   useEffect(() => {
-    aiWorkerRef.current = new Worker(new URL('../../workers/ai-worker.ts', import.meta.url));
-    setIsWorkerReady(true);
+    aiWorkerRef.current = new Worker('/ai.js');
     
     const messageHandler = (event: MessageEvent<{ bestMove: LegalMove | null, type: 'move' | 'hint' }>) => {
       const { bestMove, type } = event.data;
@@ -147,6 +146,8 @@ export const GameProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     aiWorkerRef.current.addEventListener('message', messageHandler);
+    setIsWorkerReady(true);
+
 
     return () => {
       aiWorkerRef.current?.removeEventListener('message', messageHandler);
